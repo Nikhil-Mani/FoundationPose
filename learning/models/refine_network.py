@@ -24,7 +24,7 @@ from Utils import *
 
 
 class RefineNet(nn.Module):
-  def __init__(self, cfg=None, c_in=4, n_view=1):
+  def __init__(self, cfg=None, c_in=2, n_view=1):
     super().__init__()
     self.cfg = cfg
     if self.cfg.use_BN:

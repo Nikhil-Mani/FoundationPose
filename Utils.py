@@ -1020,3 +1020,54 @@ def make_yaml_dumpable(D):
         D[d][i] = make_yaml_dumpable(D[d][i])
       continue
   return dict(D)
+
+
+def events_to_voxel_grid(ev, num_bins=5, H=720, W=1280):
+    """
+    ev: structured array with fields x, y, p, t (one frame's worth of raw events)
+    Returns: torch.FloatTensor (num_bins, H, W)
+    """
+    voxel = torch.zeros((num_bins, H, W), dtype=torch.float32)
+
+    if len(ev) == 0:
+        return voxel
+
+    t = ev['t'].astype(np.float64)
+    t0, t1 = t.min(), t.max()
+    dt = t1 - t0
+    if dt == 0:
+        dt = 1.0  # guard against a degenerate single-timestamp frame
+
+    # normalize timestamps to [0, num_bins - 1] for easier sorting
+    t_norm = (t - t0) / dt * (num_bins - 1)
+
+    x = ev['x'].astype(np.int64)
+    y = ev['y'].astype(np.int64)
+    p = np.where(ev['p'] == 0, -1.0, 1.0).astype(np.float64)  # {0,1} -> {-1,+1}
+
+    # Create torch tensors from numpy loaded data
+    x_t = torch.from_numpy(x)
+    y_t = torch.from_numpy(y)
+    p_t = torch.from_numpy(p).float()
+    t_norm_t = torch.from_numpy(t_norm).float()
+
+    # Create floor and ceil tensors for each normalized time
+    # Use weights for continuous distribution of events
+    left_bin = torch.floor(t_norm_t).long()
+    right_bin = torch.clamp(left_bin + 1, max=num_bins - 1)
+    right_weight = t_norm_t - left_bin.float()
+    left_weight = 1.0 - right_weight
+
+    # Reshape voxel into 1D tensor
+    flat_voxel = voxel.view(num_bins, -1)
+    flat_idx = y_t * W + x_t
+
+    # Add weighted distributed events back to the voxel representation
+    flat_voxel.index_put_(
+        (left_bin, flat_idx), p_t * left_weight, accumulate=True
+    )
+    flat_voxel.index_put_(
+        (right_bin, flat_idx), p_t * right_weight, accumulate=True
+    )
+
+    return voxel
